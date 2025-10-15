@@ -4,9 +4,9 @@
   "description": "Reads interview questions on supported pages and drafts answers using your configured LLM persona.",
   "version": "0.1.0",
   "icons": {
-    "16": "assets/icon16.png",
-    "48": "assets/icon48.png",
-    "128": "assets/icon128.png"
+    "16": "extension/assets/icon16.png",
+    "48": "extension/assets/icon48.png",
+    "128": "extension/assets/icon128.png"
   },
   "permissions": [
     "storage",
@@ -18,20 +18,20 @@
     "<all_urls>"
   ],
   "background": {
-  "service_worker": "src/background.js"
+  "service_worker": "extension/src/background.js"
   },
   "action": {
     "default_title": "Interview Autofill Agent",
-    "default_popup": "src/popup.html"
+    "default_popup": "extension/src/popup.html"
   },
   "options_ui": {
-    "page": "src/options.html",
+    "page": "extension/src/options.html",
     "open_in_tab": true
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "js": ["extension/src/content.js"],
       "run_at": "document_idle"
     }
   ]
