@@ -18,14 +18,16 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "extension/src/background.js",
-    "type": "module"
+  "service_worker": "extension/src/background.js"
   },
   "action": {
     "default_title": "Interview Autofill Agent",
     "default_popup": "extension/src/popup.html"
   },
-  "options_page": "extension/src/options.html",
+  "options_ui": {
+    "page": "extension/src/options.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
