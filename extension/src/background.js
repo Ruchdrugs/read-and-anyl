@@ -146,13 +146,32 @@ async function draftAnswer(questionText, pageContext) {
   return await generateAnswerFromResume(questionText, pageContext);
 }
 
+function evaluateAnswerQuality(answer) {
+  const txt = (answer || '').trim();
+  if (!txt) return { quality: 'weak', reason: 'empty answer' };
+  if (/Here is a concise answer grounded in my experience:/i.test(txt)) {
+    return { quality: 'weak', reason: 'generic template used' };
+  }
+  if (txt.length < 110) {
+    return { quality: 'weak', reason: 'too short' };
+  }
+  const hasBullets = /\n\-\s/.test(txt);
+  const hasMetric = /\b\d{1,4}(?:%|x|\b)/.test(txt) || /\b\d+\.\d+\b/.test(txt);
+  if (hasBullets && hasMetric) return { quality: 'good', reason: 'structured and metric-backed' };
+  if (hasBullets) return { quality: 'ok', reason: 'structured but low metrics' };
+  return { quality: 'ok', reason: 'adequate length' };
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type } = message || {};
   if (type === 'DRAFT_ANSWER') {
     (async () => {
       try {
         const answer = await draftAnswer(message.questionText, message.pageContext);
-        sendResponse({ ok: true, answer });
+        const { quality, reason } = evaluateAnswerQuality(answer);
+        sendResponse({ ok: true, answer, quality, reason });
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message || error) });
       }
@@ -199,6 +218,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           JSON.stringify(labels)
         ].join('\n');
         sendResponse({ ok: true, prompt });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+  if (type === 'GEMINI_OPEN_AND_ASK') {
+    (async () => {
+      try {
+        const prompt = message?.prompt || '';
+        const geminiUrl = 'https://gemini.google.com/app';
+        const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
+        const tabId = newTab?.id;
+        if (!tabId) {
+          sendResponse({ ok: false, error: 'Failed to open Gemini tab' });
+          return;
+        }
+        // Attempt several times as Gemini UI loads
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await delay(attempt === 0 ? 1500 : 1000);
+          try {
+            await new Promise((resolve, reject) => {
+              chrome.tabs.sendMessage(tabId, { type: 'GEMINI_ASK', prompt }, (resp) => {
+                if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+                if (!resp?.ok) return reject(new Error(resp?.error || 'Injection failed'));
+                resolve(resp);
+              });
+            });
+            break; // success
+          } catch (_) {
+            // try next attempt
+          }
+        }
+        sendResponse({ ok: true, tabId });
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message || error) });
       }

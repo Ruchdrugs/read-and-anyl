@@ -79,19 +79,7 @@ async function init() {
       const pageContext = collect?.pageContext || '';
       const built = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_BUILD_PROMPT', labels, pageContext }, resolve));
       if (!built?.ok) return window.close();
-      // Open Gemini web (no API key) and inject composed prompt
-      const geminiUrl = 'https://gemini.google.com/app';
-      const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
-      const tabId = newTab?.id;
-      if (!tabId) return window.close();
-      // Wait and then send GEmiNI_ASK to content script on that tab
-      setTimeout(async () => {
-        try {
-          await sendMessageToTab(tabId, { type: 'GEMINI_ASK', prompt: built.prompt });
-        } catch (e) {
-          // no-op
-        }
-      }, 2000);
+      await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_OPEN_AND_ASK', prompt: built.prompt }, resolve));
     } catch (_) {
       // ignore
     }
