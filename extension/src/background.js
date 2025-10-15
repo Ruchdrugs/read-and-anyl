@@ -258,4 +258,85 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })();
     return true;
   }
+  if (type === 'GEMINI_BATCH_ASK_AND_EXTRACT') {
+    (async () => {
+      try {
+        const labels = message?.labels || [];
+        const pageContext = message?.pageContext || '';
+        const settings = await getSettings();
+        const persona = settings.persona || {};
+        const resumeText = settings.resumeText || '';
+
+        const markerStart = 'ANSWERS_START_7b8c02';
+        const markerEnd = 'ANSWERS_END_7b8c02';
+
+        const prompt = [
+          buildSystemPrompt(persona),
+          '',
+          'You are assisting with drafting interview answers strictly grounded in the resume below.',
+          'Return ONLY a compact JSON array where each element has keys {"i": number, "question": string, "answer": string}.',
+          'The index i corresponds to the same index in the provided "labels" array. Keep answers 120-180 words, use STAR where applicable, reference specific resume bullets and metrics when available. No markdown, no extra commentary.',
+          '',
+          `Return the JSON between the exact markers ${markerStart} and ${markerEnd} with no additional text.`,
+          '',
+          'resume:\n' + resumeText,
+          '',
+          'page_context:\n' + pageContext,
+          '',
+          'labels (indexed):\n' + labels.map((q, i) => `${i}. ${q}`).join('\n')
+        ].join('\n');
+
+        const geminiUrl = 'https://gemini.google.com/app';
+        const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
+        const tabId = newTab?.id;
+        if (!tabId) return sendResponse({ ok: false, error: 'Failed to open Gemini tab' });
+
+        // Try multiple times to inject the prompt and later extract JSON
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await delay(attempt === 0 ? 1500 : 1000);
+          try {
+            await new Promise((resolve, reject) => {
+              chrome.tabs.sendMessage(tabId, { type: 'GEMINI_ASK', prompt }, (resp) => {
+                if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+                if (!resp?.ok) return reject(new Error(resp?.error || 'Injection failed'));
+                resolve(resp);
+              });
+            });
+            break; // success
+          } catch (_) {}
+        }
+
+        // Wait and extract JSON answers
+        let jsonText = null;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await delay(1000);
+          try {
+            const resp = await new Promise((resolve, reject) => {
+              chrome.tabs.sendMessage(tabId, { type: 'GEMINI_EXTRACT_JSON', start: markerStart, end: markerEnd, timeoutMs: 5000 }, (r) => {
+                if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+                resolve(r);
+              });
+            });
+            if (resp?.ok && resp.json) { jsonText = resp.json; break; }
+          } catch (_) {}
+        }
+
+        if (!jsonText) return sendResponse({ ok: false, error: 'Failed to extract answers' });
+
+        let parsed = [];
+        try { parsed = JSON.parse(jsonText); } catch (e) {
+          // attempt to repair trivial trailing commas
+          try { parsed = JSON.parse(jsonText.replace(/,(\s*[\]\}])/g, '$1')); } catch (_) {}
+        }
+        if (!Array.isArray(parsed)) return sendResponse({ ok: false, error: 'Response not an array' });
+
+        // Normalize shape
+        const answers = parsed.map((it) => ({ i: Number(it?.i), question: String(it?.question || ''), text: String(it?.answer || it?.text || '') }));
+        sendResponse({ ok: true, answers });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
 });

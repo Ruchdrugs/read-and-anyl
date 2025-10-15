@@ -8,7 +8,11 @@ const QUESTION_SELECTORS = [
   '[role="textbox"]',
   'div[contenteditable="true"]',
   'quill-editor',
-  '.ql-editor'
+  '.ql-editor',
+  '.ProseMirror',
+  '.ck-content',
+  '.mce-content-body',
+  '.notion-page-content [contenteditable="true"]'
 ];
 
 function isLikelyQuestionLabel(text) {
@@ -30,7 +34,18 @@ function isLikelyQuestionLabel(text) {
     t.includes('how did you') ||
     t.includes('what would you') ||
     t.includes('cover letter') ||
-    t.includes('motivation letter')
+    t.includes('motivation letter') ||
+    t.includes('why us') ||
+    t.includes('why company') ||
+    t.includes('why this') ||
+    t.includes('tell us') ||
+    t.includes('anything else') ||
+    t.includes('additional information') ||
+    t.includes('essay') ||
+    t.includes('statement') ||
+    t.includes('background') ||
+    t.includes('portfolio') ||
+    t.includes('accomplishment')
   );
 }
 
@@ -73,7 +88,21 @@ function getFieldLabel(node) {
     const header = preceding.querySelector('h1, h2, h3, h4, h5, h6, legend, label, strong');
     if (header) headerText = header.innerText || header.textContent || '';
   }
-  return headerText.trim();
+  if (headerText && headerText.trim()) return headerText.trim();
+
+  // 6) Previous sibling text blocks commonly used as prompts
+  try {
+    let prev = node.previousElementSibling;
+    let hops = 0;
+    while (prev && hops < 4) {
+      const txt = (prev.innerText || prev.textContent || '').trim();
+      if (txt && txt.length > 0 && txt.length < 500) return txt;
+      prev = prev.previousElementSibling;
+      hops += 1;
+    }
+  } catch (_) {}
+
+  return '';
 }
 
 function collectPageContext() {
@@ -121,8 +150,28 @@ function findQuestionFields() {
     const placeholder = node.getAttribute?.('placeholder') || '';
     const near = node.closest('section, div, fieldset');
     const nearText = near?.querySelector('h2, h3, legend, label')?.innerText?.toLowerCase?.() || '';
-    if (placeholder?.length > 60 || nearText.includes('questions') || nearText.includes('application')) {
+    const rows = Number(node.getAttribute?.('rows') || 0);
+    const maxLength = Number(node.getAttribute?.('maxlength') || 0);
+    const ariaMultiline = node.getAttribute?.('aria-multiline') === 'true';
+
+    if (
+      placeholder?.length > 20 ||
+      rows >= 3 ||
+      ariaMultiline ||
+      maxLength >= 120 ||
+      nearText.includes('questions') ||
+      nearText.includes('application') ||
+      nearText.includes('cover letter') ||
+      nearText.includes('motivation')
+    ) {
       fields.push({ node, label: label || placeholder || nearText });
+      continue;
+    }
+
+    // As a final fallback, include all textareas/contenteditables
+    const tag = node.tagName?.toLowerCase();
+    if (tag === 'textarea' || node.isContentEditable) {
+      fields.push({ node, label: label || placeholder || 'free text' });
     }
   }
   return fields;
@@ -147,30 +196,48 @@ function isWeakAnswer(answer, quality) {
 
 async function handleAutoFill() {
   const fields = findQuestionFields();
+  if (!fields || fields.length === 0) return;
   const pageContext = collectPageContext();
-  const weakLabels = [];
-  for (const { node, label } of fields) {
-    const { ok, answer, error, quality } = await askForAnswer(label || node.placeholder || '', pageContext);
-    if (ok && answer) {
-      setFieldValue(node, answer);
-      node.setAttribute?.(FILLED_ATTR, '1');
-      filledNodes.add(node);
-      if (isWeakAnswer(answer, quality)) weakLabels.push(label || '');
-    } else {
-      console.warn('Draft answer failed:', error);
+
+  // Assign stable ids to fields for mapping
+  const labels = [];
+  fields.forEach((f, i) => {
+    try { f.node.setAttribute('data-autofill-id', String(i)); } catch (_) {}
+    labels.push((f.label || f.node.getAttribute?.('placeholder') || '').toString());
+  });
+
+  // Ask Gemini web (no API) for all answers in one go
+  let answers = null;
+  try {
+    const resp = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_BATCH_ASK_AND_EXTRACT', labels, pageContext }, resolve));
+    if (resp?.ok && Array.isArray(resp.answers)) {
+      answers = resp.answers;
     }
+  } catch (_) {}
+
+  if (!answers) {
+    // Fallback to local drafting per field if Gemini failed
+    for (const { node, label } of fields) {
+      const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
+      if (ok && answer) {
+        setFieldValue(node, answer);
+        node.setAttribute?.(FILLED_ATTR, '1');
+        filledNodes.add(node);
+      }
+    }
+    return;
   }
 
-  // If answers appear weak, open Gemini with a composed prompt for assistance
-  if (weakLabels.length > 0 && window.top === window.self) {
-    try {
-      const built = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_BUILD_PROMPT', labels: weakLabels, pageContext }, resolve));
-      if (built?.ok && built.prompt) {
-        await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_OPEN_AND_ASK', prompt: built.prompt }, resolve));
-      }
-    } catch (_) {
-      // ignore fallback errors
-    }
+  // Fill answers back into fields
+  for (const a of answers) {
+    const idx = typeof a?.i === 'number' ? a.i : null;
+    const text = (a?.text || a?.answer || '').toString();
+    if (idx == null || !text) continue;
+    const f = fields[idx];
+    if (!f?.node) continue;
+    setFieldValue(f.node, text);
+    try { f.node.setAttribute?.(FILLED_ATTR, '1'); } catch (_) {}
+    filledNodes.add(f.node);
   }
 }
 
@@ -293,6 +360,50 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     } catch (error) {
       sendResponse({ ok: false, error: String(error?.message || error) });
     }
+    return true;
+  }
+  if (type === 'GEMINI_EXTRACT_JSON') {
+    (async () => {
+      try {
+        const start = (message && message.start) || 'ANSWERS_START_7b8c02';
+        const end = (message && message.end) || 'ANSWERS_END_7b8c02';
+        const maxWaitMs = Math.min(Number(message?.timeoutMs || 20000), 45000);
+        const started = Date.now();
+
+        function extractOnce() {
+          // Prefer code/pre blocks
+          const blocks = Array.from(document.querySelectorAll('pre, code, div, article'));
+          for (const el of blocks) {
+            const txt = (el.innerText || el.textContent || '').trim();
+            if (!txt) continue;
+            const si = txt.indexOf(start);
+            const ei = txt.indexOf(end);
+            if (si !== -1 && ei !== -1 && ei > si) {
+              let raw = txt.substring(si + start.length, ei).trim();
+              raw = raw.replace(/^```[\s\S]*?\n/, '').replace(/```$/,'').trim();
+              return raw;
+            }
+          }
+          const bodyTxt = (document.body?.innerText || '').trim();
+          const si2 = bodyTxt.indexOf(start);
+          const ei2 = bodyTxt.indexOf(end);
+          if (si2 !== -1 && ei2 !== -1 && ei2 > si2) {
+            return bodyTxt.substring(si2 + start.length, ei2).trim();
+          }
+          return null;
+        }
+
+        let jsonText = extractOnce();
+        while (!jsonText && Date.now() - started < maxWaitMs) {
+          await new Promise(r => setTimeout(r, 1000));
+          jsonText = extractOnce();
+        }
+        if (!jsonText) return sendResponse({ ok: false, error: 'JSON markers not found' });
+        sendResponse({ ok: true, json: jsonText });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
     return true;
   }
   if (type === 'GEMINI_ASK') {
