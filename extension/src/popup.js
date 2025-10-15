@@ -64,6 +64,8 @@ async function init() {
   answerEl.addEventListener('click', async () => {
     if (!tab?.id) return;
     try {
+      // Enable lightweight debug on the page for troubleshooting
+      try { await sendMessageToTab(tab.id, { type: 'ENABLE_DEBUG' }); } catch (_) {}
       await sendMessageToTab(tab.id, { type: 'TRIGGER_ANSWER' });
     } catch (_) {
       // ignore
