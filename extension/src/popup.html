@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interview Agent</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; width: 320px; }
+      button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ccc; background: #111; color: #fff; }
+      .row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+      label { font-weight: 600; }
+      input[type="checkbox"] { transform: scale(1.2); }
+      .hint { color: #666; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h3>Interview Autofill Agent</h3>
+    <div class="row">
+      <label>Enable on this site</label>
+      <input id="enabled" type="checkbox" />
+    </div>
+    <div class="row">
+      <label>Mode</label>
+      <select id="mode">
+        <option value="manual">Manual</option>
+        <option value="auto">Auto</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="answer">Draft & Fill Answers</button>
+    </div>
+    <p class="hint">Configure API key and persona in Options.</p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
