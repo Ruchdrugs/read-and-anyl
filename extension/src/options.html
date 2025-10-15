@@ -21,6 +21,17 @@
       <h3>Resume</h3>
       <label>Paste your resume (plain text)</label>
       <textarea id="resumeText" rows="10" placeholder="Paste your resume here. Use plain text for best results."></textarea>
+      <div class="row">
+        <div>
+          <label>Or upload your resume (PDF)</label>
+          <input id="resumePdf" type="file" accept="application/pdf,.pdf" />
+        </div>
+        <div>
+          <label>Selected file</label>
+          <input id="resumePdfName" placeholder="No file chosen" disabled />
+        </div>
+      </div>
+      <p id="pdfStatus" class="hint"></p>
       <p class="hint">Your data stays local in the browser's extension storage. No APIs used.</p>
     </div>
 
