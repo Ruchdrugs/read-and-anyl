@@ -112,7 +112,7 @@ async function handleAutoFill() {
   const fields = findQuestionFields();
   const pageContext = collectPageContext();
   for (const { node, label } of fields) {
-    const { ok, answer, error } = await askForAnswer(label || node.placeholder || '');
+    const { ok, answer, error } = await askForAnswer(label || node.placeholder || '', pageContext);
     if (ok && answer) setFieldValue(node, answer);
     else console.warn('Draft answer failed:', error);
   }
