@@ -139,3 +139,96 @@ chrome.runtime.onMessage.addListener((message) => {
     // ignore
   }
 })();
+
+// ------------------------------
+// Gemini integration helpers
+// ------------------------------
+
+function collectQuestionLabels() {
+  const fields = findQuestionFields();
+  return fields.map(({ label }) => (label || '').toString());
+}
+
+async function waitForGeminiComposer(timeoutMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    // Try common Gemini composer selectors
+    const textarea = document.querySelector('textarea');
+    const editable = document.querySelector('div[contenteditable="true"]');
+    const input = textarea || editable;
+    if (input) return input;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
+}
+
+function setComposerText(inputEl, text) {
+  const val = (text || '').trim();
+  const tag = inputEl.tagName?.toLowerCase();
+  if (tag === 'textarea') {
+    inputEl.value = val;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  if (inputEl.isContentEditable || tag === 'div') {
+    inputEl.innerHTML = val
+      .replace(/\n\n/g, '<br/><br/>')
+      .replace(/\n/g, '<br/>');
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  return false;
+}
+
+function clickGeminiSend() {
+  // Try to find a send button
+  const candidates = Array.from(document.querySelectorAll('button, div[role="button"]'));
+  const btn = candidates.find((b) => {
+    const t = (b.innerText || b.ariaLabel || b.getAttribute?.('aria-label') || '').toLowerCase();
+    return t.includes('send') || t.includes('submit') || t.includes('ask');
+  });
+  if (btn) {
+    btn.click();
+    return true;
+  }
+  // Fallback: press Enter
+  const active = document.activeElement;
+  if (active) {
+    active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    active.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    return true;
+  }
+  return false;
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const { type } = message || {};
+  if (type === 'COLLECT_FIELDS') {
+    try {
+      const labels = collectQuestionLabels();
+      const pageContext = collectPageContext();
+      sendResponse({ ok: true, labels, pageContext });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+  if (type === 'GEMINI_ASK') {
+    (async () => {
+      try {
+        const input = await waitForGeminiComposer(12000);
+        if (!input) return sendResponse({ ok: false, error: 'Gemini composer not found' });
+        const okSet = setComposerText(input, message.prompt || '');
+        if (!okSet) return sendResponse({ ok: false, error: 'Failed to set prompt' });
+        input.focus();
+        clickGeminiSend();
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true; // keep port open
+  }
+});

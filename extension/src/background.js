@@ -175,4 +175,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })();
     return true;
   }
+  if (type === 'GEMINI_BUILD_PROMPT') {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        const persona = settings.persona || {};
+        const resumeText = settings.resumeText || '';
+        const labels = message?.labels || [];
+        const pageContext = message?.pageContext || '';
+        const prompt = [
+          buildSystemPrompt(persona),
+          '',
+          'You are assisting with drafting interview answers. Based on the resume and the question labels found on this page, provide any clarifying questions needed to craft precise, metric-backed answers (limit to 6).',
+          'Then propose concise draft answers (120-180 words) for each label context, grounded strictly in the resume. Use STAR when applicable.',
+          '',
+          'Resume:',
+          resumeText,
+          '',
+          'Page context:',
+          pageContext,
+          '',
+          'Question labels:',
+          JSON.stringify(labels)
+        ].join('\n');
+        sendResponse({ ok: true, prompt });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
 });

@@ -35,6 +35,9 @@ async function init() {
   const enabledEl = document.getElementById('enabled');
   const modeEl = document.getElementById('mode');
   const answerEl = document.getElementById('answer');
+  const askGeminiEl = document.createElement('button');
+  askGeminiEl.textContent = 'Ask Gemini (No API)';
+  askGeminiEl.style.marginLeft = '8px';
 
   const resp = await getSettings();
   const settings = resp?.settings || {};
@@ -67,6 +70,36 @@ async function init() {
     }
     window.close();
   });
+
+  askGeminiEl.addEventListener('click', async () => {
+    if (!tab?.id) return;
+    try {
+      const collect = await sendMessageToTab(tab.id, { type: 'COLLECT_FIELDS' });
+      const labels = collect?.labels || [];
+      const pageContext = collect?.pageContext || '';
+      const built = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'GEMINI_BUILD_PROMPT', labels, pageContext }, resolve));
+      if (!built?.ok) return window.close();
+      // Open Gemini web (no API key) and inject composed prompt
+      const geminiUrl = 'https://gemini.google.com/app';
+      const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
+      const tabId = newTab?.id;
+      if (!tabId) return window.close();
+      // Wait and then send GEmiNI_ASK to content script on that tab
+      setTimeout(async () => {
+        try {
+          await sendMessageToTab(tabId, { type: 'GEMINI_ASK', prompt: built.prompt });
+        } catch (e) {
+          // no-op
+        }
+      }, 2000);
+    } catch (_) {
+      // ignore
+    }
+    window.close();
+  });
+
+  // Insert Ask Gemini button after Answer
+  answerEl.parentElement?.appendChild(askGeminiEl);
 }
 
 init();
