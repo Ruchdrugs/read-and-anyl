@@ -105,6 +105,15 @@ function getFieldLabel(node) {
     if (txt) return txt;
   }
 
+  // 3b) aria-describedby often holds the question copy on LinkedIn
+  const ariaDescribedBy = node.getAttribute?.('aria-describedby');
+  if (ariaDescribedBy) {
+    const ids = ariaDescribedBy.split(/\s+/).filter(Boolean);
+    const parts = ids.map(id => document.getElementById(id)).filter(Boolean).map(el => el.innerText || el.textContent || '');
+    const txt = parts.join(' ').trim();
+    if (txt) return txt;
+  }
+
   // 4) aria-label / placeholder
   const direct = [
     node.getAttribute?.('aria-label'),
@@ -224,6 +233,14 @@ function isLinkedInNonQuestionField(node, label, placeholder) {
   return false;
 }
 
+function isInLinkedInApplyContainer(node) {
+  if (!isLinkedInHost() || !node) return false;
+  const container = node.closest('.jobs-easy-apply-modal, .jobs-apply-form, .jobs-apply-page, .jobs-easy-apply-content, artdeco-modal');
+  if (!container) return false;
+  const txt = (container.innerText || container.textContent || '').toLowerCase();
+  return /easy apply|apply|application|screening|additional questions|cover letter/.test(txt);
+}
+
 function findQuestionFields() {
   const fields = [];
   const candidates = document.querySelectorAll(QUESTION_SELECTORS.join(','));
@@ -233,6 +250,26 @@ function findQuestionFields() {
     if (isLinkedInNonQuestionField(node, label, node.getAttribute?.('placeholder'))) {
       logDebug('Skipping non-question field', { label, placeholder: node.getAttribute?.('placeholder') });
       continue;
+    }
+
+    // In LinkedIn Easy Apply, relax heuristics and include obvious text inputs
+    const inLinkedInApply = isInLinkedInApplyContainer(node);
+    if (inLinkedInApply) {
+      const tag = node.tagName?.toLowerCase();
+      const rows = Number(node.getAttribute?.('rows') || 0);
+      const maxLength = Number(node.getAttribute?.('maxlength') || 0);
+      const ariaMultiline = node.getAttribute?.('aria-multiline') === 'true';
+      const isTextual = (
+        tag === 'textarea' ||
+        node.isContentEditable ||
+        (tag === 'div' && node.getAttribute?.('role') === 'textbox') ||
+        (tag === 'input' && (node.type === 'text' || !node.type) && (rows >= 3 || ariaMultiline || maxLength >= 120))
+      );
+      if (isTextual) {
+        const placeholder = node.getAttribute?.('placeholder') || '';
+        fields.push({ node, label: label || placeholder || 'application question' });
+        continue;
+      }
     }
     if (isLikelyQuestionLabel(label)) {
       fields.push({ node, label });
@@ -413,6 +450,22 @@ chrome.runtime.onMessage.addListener((message) => {
     history.replaceState = function() { origReplace.apply(this, arguments); schedule(); };
     logDebug('Navigation hooks installed');
   } catch (_) {}
+
+  // On LinkedIn, re-run after step transitions (Next/Continue/Review/Submit)
+  if (isLinkedInHost()) {
+    try {
+      document.addEventListener('click', (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        const b = t ? t.closest('button, [role="button"]') : null;
+        if (!b) return;
+        const txt = (b.innerText || b.ariaLabel || b.getAttribute?.('aria-label') || '').toLowerCase();
+        if (/\b(next|continue|review|submit|apply)\b/.test(txt)) {
+          setTimeout(() => handleAutoFill(), 450);
+        }
+      }, true);
+      logDebug('LinkedIn step button hook installed');
+    } catch (_) {}
+  }
 })();
 
 // ------------------------------
