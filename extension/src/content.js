@@ -15,10 +15,22 @@ const QUESTION_SELECTORS = [
   '.notion-page-content [contenteditable="true"]'
 ];
 
+const DEBUG = (() => {
+  try { return !!(window.__INTERVIEW_AUTOFILL_DEBUG__ || localStorage.getItem('autofill_debug')); } catch (_) { return false; }
+})();
+
+function logDebug(...args) { if (DEBUG) try { console.debug('[Autofill]', ...args); } catch (_) {} }
+
+function isLinkedInHost() {
+  const h = location.hostname || '';
+  return /(\.|^)linkedin\.com$/i.test(h);
+}
+
 function isLikelyQuestionLabel(text) {
   if (!text) return false;
   const t = text.trim().toLowerCase();
   return (
+    /\?\s*$/.test(t) ||
     t.includes('why do you want') ||
     t.includes('tell me about') ||
     t.includes('experience') ||
@@ -45,8 +57,27 @@ function isLikelyQuestionLabel(text) {
     t.includes('statement') ||
     t.includes('background') ||
     t.includes('portfolio') ||
-    t.includes('accomplishment')
+    t.includes('accomplishment') ||
+    // Screener-style prompts common on LinkedIn apply flows
+    /\bhow many years\b/.test(t) ||
+    /\byears of experience\b/.test(t) ||
+    /\bare you willing\b/.test(t) ||
+    /\bdo you have\b/.test(t) ||
+    /\bauthori[sz]ation to work\b/.test(t) ||
+    /\bsalary (?:range|expectation|expectations)\b/.test(t) ||
+    /\bwork (?:permit|authorization)\b/.test(t) ||
+    /\bcover letter\b/.test(t) ||
+    /\badditional (?:information|details)\b/.test(t) ||
+    /\bplease provide\b/.test(t) ||
+    /\bexplain\b/.test(t) ||
+    /\bwhy (?:us|this|company)\b/.test(t)
   );
+}
+
+function isStrongQuestionLabel(text) {
+  if (!text) return false;
+  const t = text.trim().toLowerCase();
+  return /\?\s*$/.test(t) || /\b(tell me about|describe|why|how did you|what would you|please provide|explain)\b/.test(t);
 }
 
 function getFieldLabel(node) {
@@ -69,6 +100,15 @@ function getFieldLabel(node) {
   const ariaLabelledBy = node.getAttribute?.('aria-labelledby');
   if (ariaLabelledBy) {
     const ids = ariaLabelledBy.split(/\s+/).filter(Boolean);
+    const parts = ids.map(id => document.getElementById(id)).filter(Boolean).map(el => el.innerText || el.textContent || '');
+    const txt = parts.join(' ').trim();
+    if (txt) return txt;
+  }
+
+  // 3b) aria-describedby often holds the question copy on LinkedIn
+  const ariaDescribedBy = node.getAttribute?.('aria-describedby');
+  if (ariaDescribedBy) {
+    const ids = ariaDescribedBy.split(/\s+/).filter(Boolean);
     const parts = ids.map(id => document.getElementById(id)).filter(Boolean).map(el => el.innerText || el.textContent || '');
     const txt = parts.join(' ').trim();
     if (txt) return txt;
@@ -114,21 +154,62 @@ function collectPageContext() {
   return [title, metaDesc, job].filter(Boolean).join('\n');
 }
 
+function setNativeValue(element, value) {
+  try {
+    const tag = element.tagName?.toLowerCase();
+    const proto = tag === 'textarea'
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(element, value);
+      return true;
+    }
+  } catch (_) {}
+  try { element.value = value; return true; } catch (_) {}
+  return false;
+}
+
 function setFieldValue(field, text) {
   if (!field) return;
   const tag = field.tagName?.toLowerCase();
   if (tag === 'textarea' || (tag === 'input' && field.type === 'text')) {
-    field.value = text;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    field.dispatchEvent(new Event('change', { bubbles: true }));
+    const val = (text || '').toString();
+    try { field.focus(); } catch (_) {}
+    try { field.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: val })); } catch (_) {}
+    setNativeValue(field, val);
+    try { field.setSelectionRange?.(val.length, val.length); } catch (_) {}
+    try { field.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: val })); } catch (_) {}
+    try { field.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+    try { field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true })); } catch (_) {}
+    logDebug('Set value on input/textarea', { placeholder: field.placeholder, valueLen: val.length });
     return;
   }
   if (field.isContentEditable || tag === 'div') {
-    field.innerHTML = text
-      .replace(/\n\n/g, '<br/><br/>')
-      .replace(/\n/g, '<br/>');
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    field.dispatchEvent(new Event('change', { bubbles: true }));
+    const val = (text || '').toString();
+    try {
+      field.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      // Fire beforeinput to satisfy editors listening for it
+      try { field.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: val })); } catch (_) {}
+      // Attempt insertText first
+      if (!document.execCommand('insertText', false, val)) {
+        // Fallback to insertHTML
+        document.execCommand('insertHTML', false, val.replace(/\n/g, '<br/>'));
+      }
+    } catch (_) {
+      field.innerHTML = val
+        .replace(/\n\n/g, '<br/><br/>')
+        .replace(/\n/g, '<br/>');
+    }
+    try { field.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste', data: val })); } catch (_) {}
+    try { field.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+    try { field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true })); } catch (_) {}
+    logDebug('Inserted text into contenteditable', { valueLen: val.length });
     return;
   }
 }
@@ -136,12 +217,60 @@ function setFieldValue(field, text) {
 const FILLED_ATTR = 'data-autofilled';
 const filledNodes = new WeakSet();
 
+function isLinkedInNonQuestionField(node, label, placeholder) {
+  if (!isLinkedInHost()) return false;
+  const pl = (placeholder || '').toLowerCase();
+  const lb = (label || '').toLowerCase();
+  const near = node.closest('section, form, article, div');
+  const nearText = (near?.innerText || near?.textContent || '').toLowerCase();
+
+  // Exclude search, messaging, comments, and feed composers
+  const isSearch = node.matches('input[type="search"], input[role="searchbox"], input.search-global-typeahead__input') || /search/.test(pl) || /search/.test(lb);
+  const isMessaging = nearText.includes('send message') || near?.querySelector?.('.msg-form__contenteditable');
+  const isComment = nearText.includes('comment') && nearText.includes('post');
+  const isFeedComposer = nearText.includes('start a post') || nearText.includes('share your thoughts');
+  if (isSearch || isMessaging || isComment || isFeedComposer) return true;
+  return false;
+}
+
+function isInLinkedInApplyContainer(node) {
+  if (!isLinkedInHost() || !node) return false;
+  const container = node.closest('.jobs-easy-apply-modal, .jobs-apply-form, .jobs-apply-page, .jobs-easy-apply-content, artdeco-modal');
+  if (!container) return false;
+  const txt = (container.innerText || container.textContent || '').toLowerCase();
+  return /easy apply|apply|application|screening|additional questions|cover letter/.test(txt);
+}
+
 function findQuestionFields() {
   const fields = [];
   const candidates = document.querySelectorAll(QUESTION_SELECTORS.join(','));
   for (const node of candidates) {
     if (node.hasAttribute?.(FILLED_ATTR) || filledNodes.has(node)) continue;
     const label = getFieldLabel(node);
+    if (isLinkedInNonQuestionField(node, label, node.getAttribute?.('placeholder'))) {
+      logDebug('Skipping non-question field', { label, placeholder: node.getAttribute?.('placeholder') });
+      continue;
+    }
+
+    // In LinkedIn Easy Apply, relax heuristics and include obvious text inputs
+    const inLinkedInApply = isInLinkedInApplyContainer(node);
+    if (inLinkedInApply) {
+      const tag = node.tagName?.toLowerCase();
+      const rows = Number(node.getAttribute?.('rows') || 0);
+      const maxLength = Number(node.getAttribute?.('maxlength') || 0);
+      const ariaMultiline = node.getAttribute?.('aria-multiline') === 'true';
+      const isTextual = (
+        tag === 'textarea' ||
+        node.isContentEditable ||
+        (tag === 'div' && node.getAttribute?.('role') === 'textbox') ||
+        (tag === 'input' && (node.type === 'text' || !node.type) && (rows >= 3 || ariaMultiline || maxLength >= 120))
+      );
+      if (isTextual) {
+        const placeholder = node.getAttribute?.('placeholder') || '';
+        fields.push({ node, label: label || placeholder || 'application question' });
+        continue;
+      }
+    }
     if (isLikelyQuestionLabel(label)) {
       fields.push({ node, label });
       continue;
@@ -164,14 +293,22 @@ function findQuestionFields() {
       nearText.includes('cover letter') ||
       nearText.includes('motivation')
     ) {
-      fields.push({ node, label: label || placeholder || nearText });
+      if (!isLinkedInNonQuestionField(node, label, placeholder)) {
+        fields.push({ node, label: label || placeholder || nearText });
+      } else {
+        logDebug('Heuristic candidate rejected (LinkedIn non-question)', { label, placeholder });
+      }
       continue;
     }
 
     // As a final fallback, include all textareas/contenteditables
     const tag = node.tagName?.toLowerCase();
     if (tag === 'textarea' || node.isContentEditable) {
-      fields.push({ node, label: label || placeholder || 'free text' });
+      if (!isLinkedInNonQuestionField(node, label, placeholder)) {
+        fields.push({ node, label: label || placeholder || 'free text' });
+      } else {
+        logDebug('Fallback candidate rejected (LinkedIn non-question)', { label, placeholder });
+      }
     }
   }
   return fields;
@@ -247,6 +384,9 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'TRIGGER_ANSWER') {
     handleAutoFill();
   }
+  if (message?.type === 'ENABLE_DEBUG') {
+    try { window.__INTERVIEW_AUTOFILL_DEBUG__ = true; localStorage.setItem('autofill_debug', '1'); } catch (_) {}
+  }
 });
 
 // Always auto-run and watch for dynamic fields
@@ -254,6 +394,12 @@ chrome.runtime.onMessage.addListener((message) => {
   // Avoid interfering with Gemini page itself
   const host = location.hostname;
   if (/(^|\.)gemini\.google\.com$/i.test(host)) return;
+
+  // On LinkedIn, avoid feed and messaging surfaces
+  if (isLinkedInHost()) {
+    const path = location.pathname || '';
+    if (/^\/feed\b/.test(path) || /^\/messaging\b/.test(path)) return;
+  }
 
   handleAutoFill();
   let scheduled = false;
@@ -282,9 +428,43 @@ chrome.runtime.onMessage.addListener((message) => {
         }
       }
     });
-    observer.observe(document.documentElement || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['placeholder', 'aria-label', 'aria-labelledby'] });
+    observer.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['placeholder', 'aria-label', 'aria-labelledby', 'contenteditable', 'role', 'class']
+    });
+    logDebug('MutationObserver attached');
   } catch (_) {
     // ignore observer failures
+  }
+
+  // React to SPA navigations
+  try {
+    const rerun = () => schedule();
+    window.addEventListener('popstate', rerun, { passive: true });
+    window.addEventListener('hashchange', rerun, { passive: true });
+    const origPush = history.pushState;
+    history.pushState = function() { origPush.apply(this, arguments); schedule(); };
+    const origReplace = history.replaceState;
+    history.replaceState = function() { origReplace.apply(this, arguments); schedule(); };
+    logDebug('Navigation hooks installed');
+  } catch (_) {}
+
+  // On LinkedIn, re-run after step transitions (Next/Continue/Review/Submit)
+  if (isLinkedInHost()) {
+    try {
+      document.addEventListener('click', (e) => {
+        const t = e.target instanceof Element ? e.target : null;
+        const b = t ? t.closest('button, [role="button"]') : null;
+        if (!b) return;
+        const txt = (b.innerText || b.ariaLabel || b.getAttribute?.('aria-label') || '').toLowerCase();
+        if (/\b(next|continue|review|submit|apply)\b/.test(txt)) {
+          setTimeout(() => handleAutoFill(), 450);
+        }
+      }, true);
+      logDebug('LinkedIn step button hook installed');
+    } catch (_) {}
   }
 })();
 
