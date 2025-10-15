@@ -230,7 +230,8 @@ async function handleAutoFill() {
 
   // Fill answers back into fields
   for (const a of answers) {
-    const idx = typeof a?.i === 'number' ? a.i : null;
+    const parsedIdx = Number(a?.i);
+    const idx = Number.isFinite(parsedIdx) ? parsedIdx : null;
     const text = (a?.text || a?.answer || '').toString();
     if (idx == null || !text) continue;
     const f = fields[idx];

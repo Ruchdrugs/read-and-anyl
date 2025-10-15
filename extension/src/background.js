@@ -107,30 +107,22 @@ function pickTop(items, question, pageContext, k = 5) {
 }
 
 function composeAnswer({ question, persona, picks }) {
-  const system = buildSystemPrompt(persona);
-  const intro = system ? `${system}\n` : '';
-  const header = question ? `Question: ${normalizeWhitespace(question)}\n\n` : '';
+  // Produce answer text only; do not prepend persona/system or a question header
   if (!picks || picks.length === 0) {
-    return (
-      intro + header +
-      [
-        'Here is a concise answer grounded in my experience:',
-        '- I align my experience to the role by focusing on impact and clear business outcomes.',
-        '- I communicate trade-offs, collaborate closely with stakeholders, and iterate quickly.',
-        '- When appropriate, I back claims with metrics and specific examples.'
-      ].join('\n')
-    ).trim();
+    return [
+      'Here is a concise answer grounded in my experience:',
+      '- I align my experience to the role by focusing on impact and clear business outcomes.',
+      '- I communicate trade-offs, collaborate closely with stakeholders, and iterate quickly.',
+      '- When appropriate, I back claims with metrics and specific examples.'
+    ].join('\n').trim();
   }
   const bullets = picks.map(p => `- ${p}`);
-  return (
-    intro + header +
-    [
-      'Relevant experience from my resume:',
-      ...bullets,
-      '',
-      'I tailor these examples to the question by emphasizing results, the reasoning behind decisions, and lessons learned.'
-    ].join('\n')
-  ).trim();
+  return [
+    'Relevant experience from my resume:',
+    ...bullets,
+    '',
+    'I tailor these examples to the question by emphasizing results, the reasoning behind decisions, and lessons learned.'
+  ].join('\n').trim();
 }
 
 async function generateAnswerFromResume(questionText, pageContext) {
@@ -271,11 +263,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const markerEnd = 'ANSWERS_END_7b8c02';
 
         const prompt = [
-          buildSystemPrompt(persona),
-          '',
-          'You are assisting with drafting interview answers strictly grounded in the resume below.',
+          // Keep instructions minimal to avoid visible intro/preamble
+          'Draft interview answers strictly grounded in the resume below.',
           'Return ONLY a compact JSON array where each element has keys {"i": number, "question": string, "answer": string}.',
-          'The index i corresponds to the same index in the provided "labels" array. Keep answers 120-180 words, use STAR where applicable, reference specific resume bullets and metrics when available. No markdown, no extra commentary.',
+          'IMPORTANT: i MUST be zero-based to match the provided labels indices.',
+          'Keep answers 120-180 words, use STAR when applicable, and reference resume metrics when available. No markdown. No extra commentary.',
           '',
           `Return the JSON between the exact markers ${markerStart} and ${markerEnd} with no additional text.`,
           '',
@@ -330,8 +322,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (!Array.isArray(parsed)) return sendResponse({ ok: false, error: 'Response not an array' });
 
+        // Detect if indices are 1-based and normalize to 0-based
+        const rawIdxs = parsed.map((it) => Number(it?.i)).filter((n) => Number.isFinite(n));
+        const hasZero = rawIdxs.includes(0);
+        const minIdx = rawIdxs.length ? Math.min(...rawIdxs) : 0;
+        const maxIdx = rawIdxs.length ? Math.max(...rawIdxs) : 0;
+        const looksOneBased = !hasZero && minIdx >= 1 && maxIdx <= (labels?.length || maxIdx);
+
         // Normalize shape
-        const answers = parsed.map((it) => ({ i: Number(it?.i), question: String(it?.question || ''), text: String(it?.answer || it?.text || '') }));
+        const answers = parsed.map((it) => {
+          const rawIndex = Number(it?.i);
+          let norm = Number.isFinite(rawIndex) ? rawIndex : null;
+          if (Number.isFinite(norm) && looksOneBased) norm = norm - 1;
+          if (Number.isFinite(norm) && (norm < 0 || (labels && norm >= labels.length))) norm = null;
+          return ({ i: norm, question: String(it?.question || ''), text: String(it?.answer || it?.text || '') });
+        });
         sendResponse({ ok: true, answers });
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message || error) });
