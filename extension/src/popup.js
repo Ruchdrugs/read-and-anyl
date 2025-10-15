@@ -6,6 +6,31 @@ async function saveSettings(partial) {
   return new Promise((resolve) => chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', partial }, resolve));
 }
 
+function queryActiveTab() {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        resolve((tabs && tabs[0]) || null);
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function sendMessageToTab(tabId, message) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+        resolve(response);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 async function init() {
   const enabledEl = document.getElementById('enabled');
   const modeEl = document.getElementById('mode');
@@ -13,8 +38,8 @@ async function init() {
 
   const resp = await getSettings();
   const settings = resp?.settings || {};
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const host = new URL(tab.url).hostname;
+  const tab = await queryActiveTab();
+  const host = tab?.url ? new URL(tab.url).hostname : location.hostname;
   const site = settings.siteConfig?.[host] || { enabled: false, mode: 'manual' };
 
   enabledEl.checked = !!site.enabled;
@@ -35,7 +60,11 @@ async function init() {
 
   answerEl.addEventListener('click', async () => {
     if (!tab?.id) return;
-    await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_ANSWER' });
+    try {
+      await sendMessageToTab(tab.id, { type: 'TRIGGER_ANSWER' });
+    } catch (_) {
+      // ignore
+    }
     window.close();
   });
 }
