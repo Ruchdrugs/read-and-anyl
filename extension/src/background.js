@@ -144,7 +144,19 @@ async function generateAnswerFromResume(questionText, pageContext) {
 }
 
 async function draftAnswer(questionText, pageContext) {
-  return await generateAnswerFromResume(questionText, pageContext);
+  // Check cache first
+  const cached = getCachedAnswer(questionText);
+  if (cached) {
+    return cached;
+  }
+
+  // Generate new answer
+  const answer = await generateAnswerFromResume(questionText, pageContext);
+
+  // Cache the answer
+  cacheAnswer(questionText, answer);
+
+  return answer;
 }
 
 function evaluateAnswerQuality(answer) {
