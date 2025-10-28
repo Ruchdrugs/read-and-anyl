@@ -120,7 +120,8 @@ async function save() {
       role: getEl('role').value.trim(),
       tone: getEl('tone').value.trim(),
       extra: getEl('extra').value.trim()
-    }
+    },
+    storedAnswers: collectStoredAnswers()
   };
   await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', partial: next }, resolve));
   const btn = document.getElementById('save');
