@@ -9,6 +9,15 @@ const DEFAULT_SETTINGS = {
     role: 'Senior Software Engineer',
     tone: 'concise, confident, collaborative',
     extra: ''
+  },
+  storedAnswers: {
+    // Question pattern → answer mapping
+    // Examples:
+    // 'years of experience': '5',
+    // 'work authorization': 'Yes, I am authorized to work in the US',
+    // 'visa sponsorship': 'No, I do not require visa sponsorship',
+    // 'willing to relocate': 'Yes',
+    // 'salary expectations': '$120,000 - $150,000'
   }
 };
 
