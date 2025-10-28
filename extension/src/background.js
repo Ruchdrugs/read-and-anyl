@@ -285,6 +285,17 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type } = message || {};
+  if (type === 'GET_STORED_ANSWER') {
+    (async () => {
+      try {
+        const result = await findStoredAnswer(message.questionText, message.questionType);
+        sendResponse({ ok: true, answer: result?.answer || null, source: result?.source || null });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
   if (type === 'DRAFT_ANSWER') {
     (async () => {
       try {
