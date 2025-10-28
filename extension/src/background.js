@@ -417,8 +417,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ].join('\n');
 
         const geminiUrl = 'https://gemini.google.com/app';
-        const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
-        const tabId = newTab?.id;
+
+        // Try to reuse existing Gemini tab
+        let tabId = null;
+        try {
+          const existingTabs = await chrome.tabs.query({ url: 'https://gemini.google.com/*' });
+          if (existingTabs && existingTabs.length > 0) {
+            // Use the first Gemini tab found
+            const geminiTab = existingTabs[0];
+            tabId = geminiTab.id;
+            // Bring it to focus
+            await chrome.tabs.update(tabId, { active: true });
+            await delay(500); // Brief delay to let tab focus
+          }
+        } catch (_) {}
+
+        // If no existing tab found, create new one
+        if (!tabId) {
+          const newTab = await new Promise((resolve) => chrome.tabs.create({ url: geminiUrl, active: true }, resolve));
+          tabId = newTab?.id;
+        }
         if (!tabId) return sendResponse({ ok: false, error: 'Failed to open Gemini tab' });
 
         // Try multiple times to inject the prompt and later extract JSON
