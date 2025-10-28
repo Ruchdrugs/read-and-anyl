@@ -265,6 +265,19 @@ function bindPdfInput() {
   });
 }
 
+// Event listeners
 getEl('save').addEventListener('click', save);
 bindPdfInput();
+
+// Stored answers event listeners
+const addAnswerBtn = getEl('addAnswerBtn');
+if (addAnswerBtn) {
+  addAnswerBtn.addEventListener('click', () => addAnswerRow('', ''));
+}
+
+const loadCommonBtn = getEl('loadCommonBtn');
+if (loadCommonBtn) {
+  loadCommonBtn.addEventListener('click', loadCommonQuestions);
+}
+
 load();
