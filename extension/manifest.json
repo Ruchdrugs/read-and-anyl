@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Interview Autofill Agent",
   "description": "Reads interview questions on supported pages and drafts answers using your configured LLM persona.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icons": {
     "16": "assets/icon16.png",
     "48": "assets/icon48.png",
