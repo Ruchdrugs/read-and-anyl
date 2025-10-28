@@ -396,7 +396,7 @@ function findQuestionFields() {
       }
     }
     if (isLikelyQuestionLabel(label)) {
-      fields.push({ node, label });
+      fields.push({ node, label, fieldType, questionType });
       continue;
     }
     // Heuristic: long placeholder or within sections named questions/application
@@ -418,18 +418,18 @@ function findQuestionFields() {
       nearText.includes('motivation')
     ) {
       if (!isLinkedInNonQuestionField(node, label, placeholder)) {
-        fields.push({ node, label: label || placeholder || nearText });
+        fields.push({ node, label: label || placeholder || nearText, fieldType, questionType });
       } else {
         logDebug('Heuristic candidate rejected (LinkedIn non-question)', { label, placeholder });
       }
       continue;
     }
 
-    // As a final fallback, include all textareas/contenteditables
+    // As a final fallback, include all textareas/contenteditables and other field types
     const tag = node.tagName?.toLowerCase();
-    if (tag === 'textarea' || node.isContentEditable) {
+    if (tag === 'textarea' || node.isContentEditable || fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox') {
       if (!isLinkedInNonQuestionField(node, label, placeholder)) {
-        fields.push({ node, label: label || placeholder || 'free text' });
+        fields.push({ node, label: label || placeholder || 'free text', fieldType, questionType });
       } else {
         logDebug('Fallback candidate rejected (LinkedIn non-question)', { label, placeholder });
       }
