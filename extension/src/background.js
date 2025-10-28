@@ -163,6 +163,112 @@ function evaluateAnswerQuality(answer) {
   return { quality: 'ok', reason: 'adequate length' };
 }
 
+// Answer cache to avoid regenerating same answers
+const answerCache = new Map(); // questionSignature → {answer, timestamp}
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanExpiredCache() {
+  const now = Date.now();
+  const toDelete = [];
+  for (const [key, value] of answerCache.entries()) {
+    if (now - value.timestamp > CACHE_DURATION) {
+      toDelete.push(key);
+    }
+  }
+  toDelete.forEach(key => answerCache.delete(key));
+}
+
+function getCachedAnswer(questionText) {
+  if (!questionText) return null;
+  const key = questionText.toLowerCase().trim();
+  const cached = answerCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.answer;
+  }
+  return null;
+}
+
+function cacheAnswer(questionText, answer) {
+  if (!questionText || !answer) return;
+  const key = questionText.toLowerCase().trim();
+  answerCache.set(key, { answer, timestamp: Date.now() });
+
+  // Clean up periodically
+  if (answerCache.size > 100) {
+    cleanExpiredCache();
+  }
+}
+
+/**
+ * Find stored answer matching the question
+ * Uses fuzzy matching to find best match from stored answers
+ */
+async function findStoredAnswer(questionText, questionType) {
+  if (!questionText) return null;
+
+  const settings = await getSettings();
+  const stored = settings.storedAnswers || {};
+
+  // If no stored answers, return null
+  if (Object.keys(stored).length === 0) return null;
+
+  // First, try exact match on questionType
+  if (questionType && stored[questionType]) {
+    return { answer: stored[questionType], source: 'stored', matchType: 'question_type' };
+  }
+
+  // Fuzzy match against all stored question patterns
+  const questionLower = questionText.toLowerCase().trim();
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const [pattern, answer] of Object.entries(stored)) {
+    if (!answer) continue;
+
+    const patternLower = pattern.toLowerCase().trim();
+
+    // Exact match
+    if (questionLower === patternLower) {
+      return { answer, source: 'stored', matchType: 'exact' };
+    }
+
+    // Substring match (pattern is in question or vice versa)
+    if (questionLower.includes(patternLower) || patternLower.includes(questionLower)) {
+      const score = Math.min(questionLower.length, patternLower.length) / Math.max(questionLower.length, patternLower.length);
+      if (score > 0.7 && score > bestScore) {
+        bestScore = score;
+        bestMatch = answer;
+      }
+    }
+
+    // Word overlap matching
+    const qWords = questionLower.split(/\s+/).filter(w => w.length > 2);
+    const pWords = patternLower.split(/\s+/).filter(w => w.length > 2);
+
+    if (qWords.length > 0 && pWords.length > 0) {
+      const qSet = new Set(qWords);
+      const pSet = new Set(pWords);
+
+      let overlap = 0;
+      for (const word of qSet) {
+        if (pSet.has(word)) overlap++;
+      }
+
+      const score = (2 * overlap) / (qSet.size + pSet.size);
+      if (score > 0.7 && score > bestScore) {
+        bestScore = score;
+        bestMatch = answer;
+      }
+    }
+  }
+
+  if (bestMatch && bestScore > 0.7) {
+    return { answer: bestMatch, source: 'stored', matchType: 'fuzzy', score: bestScore };
+  }
+
+  return null;
+}
+
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
