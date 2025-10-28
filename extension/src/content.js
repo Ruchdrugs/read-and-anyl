@@ -210,6 +210,47 @@ function getFieldLabel(node) {
     }
   } catch (_) {}
 
+  // 7) Pattern matching on nearby visible text (for LinkedIn dynamic content)
+  try {
+    let parent = node.parentElement;
+    let levels = 0;
+    while (parent && levels < 3) {
+      const allText = (parent.innerText || parent.textContent || '').trim();
+      if (allText && allText.length > 10 && allText.length < 300) {
+        // Look for question-like patterns
+        if (/\?|describe|explain|tell|why|how|experience|years|authorization|relocate|salary|willing/i.test(allText)) {
+          // Find text nodes near the field
+          const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT, null, false);
+          let textNode;
+          let foundField = false;
+          let nearbyTexts = [];
+
+          while ((textNode = walker.nextNode())) {
+            if (textNode.parentElement?.contains(node)) {
+              foundField = true;
+              continue;
+            }
+            const text = textNode.textContent?.trim();
+            if (text && text.length > 5 && text.length < 150) {
+              nearbyTexts.push({ text, foundAfter: foundField });
+            }
+          }
+
+          // Return text that appears right before the field
+          const beforeTexts = nearbyTexts.filter(t => !t.foundAfter);
+          if (beforeTexts.length > 0) {
+            const lastBefore = beforeTexts[beforeTexts.length - 1].text;
+            if (/\?|describe|explain|tell|why|how/i.test(lastBefore)) {
+              return lastBefore;
+            }
+          }
+        }
+      }
+      parent = parent.parentElement;
+      levels++;
+    }
+  } catch (_) {}
+
   return '';
 }
 
