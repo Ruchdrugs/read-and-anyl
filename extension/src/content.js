@@ -455,10 +455,33 @@ function isWeakAnswer(answer, quality) {
   return false;
 }
 
+// Track retry attempts
+let autoFillRetryCount = 0;
+const MAX_RETRIES = 3;
+
 async function handleAutoFill() {
   const fields = findQuestionFields();
-  if (!fields || fields.length === 0) return;
+
+  // Retry logic for LinkedIn Easy Apply if no fields found
+  if ((!fields || fields.length === 0) && isLinkedInHost() && autoFillRetryCount < MAX_RETRIES) {
+    autoFillRetryCount++;
+    const retryDelay = Math.pow(2, autoFillRetryCount - 1) * 500; // Exponential backoff: 500ms, 1000ms, 2000ms
+    logDebug(`No fields found, retrying in ${retryDelay}ms (attempt ${autoFillRetryCount}/${MAX_RETRIES})`);
+    setTimeout(() => handleAutoFill(), retryDelay);
+    return;
+  }
+
+  if (!fields || fields.length === 0) {
+    logDebug('No question fields found after retries');
+    autoFillRetryCount = 0; // Reset for next run
+    return;
+  }
+
+  // Reset retry count on success
+  autoFillRetryCount = 0;
+
   const pageContext = collectPageContext();
+  logDebug(`Found ${fields.length} question fields`, fields.map(f => ({ label: f.label, type: f.fieldType, qType: f.questionType })));
 
   // Assign stable ids to fields for mapping
   const labels = [];
@@ -478,18 +501,60 @@ async function handleAutoFill() {
 
   if (!answers) {
     // Fallback to local drafting per field if Gemini failed
-    for (const { node, label } of fields) {
-      const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
-      if (ok && answer) {
-        setFieldValue(node, answer);
-        node.setAttribute?.(FILLED_ATTR, '1');
-        filledNodes.add(node);
+    for (let i = 0; i < fields.length; i++) {
+      const { node, label, fieldType, questionType } = fields[i];
+
+      // First, check for stored answer
+      let answer = null;
+      try {
+        const storedResp = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({ type: 'GET_STORED_ANSWER', questionText: label, questionType }, resolve)
+        );
+        if (storedResp?.ok && storedResp.answer) {
+          answer = storedResp.answer;
+          logDebug('Using stored answer', { label, answer });
+        }
+      } catch (_) {}
+
+      // If no stored answer, generate one
+      if (!answer) {
+        const { ok, answer: generatedAnswer } = await askForAnswer(label || node.placeholder || '', pageContext);
+        if (ok && generatedAnswer) {
+          answer = generatedAnswer;
+        }
+      }
+
+      // Fill field based on type
+      if (answer) {
+        let filled = false;
+        if (fieldType === 'text') {
+          filled = window.fieldHandlers?.setTextFieldValue(node, answer) || false;
+        } else if (fieldType === 'select') {
+          filled = window.fieldHandlers?.setSelectFieldValue(node, answer, label) || false;
+        } else if (fieldType === 'radio') {
+          filled = window.fieldHandlers?.setRadioFieldValue(node, answer, label) || false;
+        } else if (fieldType === 'checkbox') {
+          filled = window.fieldHandlers?.setCheckboxFieldValue(node, answer, label) || false;
+        } else if (fieldType === 'number') {
+          filled = window.fieldHandlers?.setNumberFieldValue(node, answer) || false;
+        } else if (fieldType === 'file') {
+          const result = window.fieldHandlers?.handleFileField(node, label);
+          logDebug('File field handling result:', result);
+          // Don't mark as filled since file fields need manual upload
+          continue;
+        }
+
+        if (filled) {
+          node.setAttribute?.(FILLED_ATTR, '1');
+          filledNodes.add(node);
+          logDebug('Filled field', { label, fieldType, answerLength: answer.length });
+        }
       }
     }
     return;
   }
 
-  // Fill answers back into fields
+  // Fill answers back into fields (from Gemini batch response)
   for (const a of answers) {
     const parsedIdx = Number(a?.i);
     const idx = Number.isFinite(parsedIdx) ? parsedIdx : null;
@@ -497,9 +562,30 @@ async function handleAutoFill() {
     if (idx == null || !text) continue;
     const f = fields[idx];
     if (!f?.node) continue;
-    setFieldValue(f.node, text);
-    try { f.node.setAttribute?.(FILLED_ATTR, '1'); } catch (_) {}
-    filledNodes.add(f.node);
+
+    // Use appropriate handler based on field type
+    let filled = false;
+    if (f.fieldType === 'text') {
+      filled = window.fieldHandlers?.setTextFieldValue(f.node, text) || false;
+    } else if (f.fieldType === 'select') {
+      filled = window.fieldHandlers?.setSelectFieldValue(f.node, text, f.label) || false;
+    } else if (f.fieldType === 'radio') {
+      filled = window.fieldHandlers?.setRadioFieldValue(f.node, text, f.label) || false;
+    } else if (f.fieldType === 'checkbox') {
+      filled = window.fieldHandlers?.setCheckboxFieldValue(f.node, text, f.label) || false;
+    } else if (f.fieldType === 'number') {
+      filled = window.fieldHandlers?.setNumberFieldValue(f.node, text) || false;
+    } else if (f.fieldType === 'file') {
+      const result = window.fieldHandlers?.handleFileField(f.node, f.label);
+      logDebug('File field handling result:', result);
+      continue;
+    }
+
+    if (filled) {
+      try { f.node.setAttribute?.(FILLED_ATTR, '1'); } catch (_) {}
+      filledNodes.add(f.node);
+      logDebug('Filled field from Gemini', { label: f.label, fieldType: f.fieldType });
+    }
   }
 }
 
