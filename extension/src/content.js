@@ -582,9 +582,49 @@ chrome.runtime.onMessage.addListener((message) => {
         const t = e.target instanceof Element ? e.target : null;
         const b = t ? t.closest('button, [role="button"]') : null;
         if (!b) return;
+
+        // Only trigger for buttons within Easy Apply modal
+        const applyContainer = b.closest('.jobs-easy-apply-modal, .jobs-apply-form, .jobs-apply-page, artdeco-modal');
+        if (!applyContainer) return;
+
         const txt = (b.innerText || b.ariaLabel || b.getAttribute?.('aria-label') || '').toLowerCase();
         if (/\b(next|continue|review|submit|apply)\b/.test(txt)) {
-          setTimeout(() => handleAutoFill(), 450);
+          // Wait for DOM to stabilize before re-running autofill
+          let mutationTimer = null;
+          let totalWaitTime = 0;
+          const maxWaitTime = 3000;
+          const stabilityDelay = 500;
+
+          const observer = new MutationObserver(() => {
+            // Reset timer on each mutation
+            if (mutationTimer) clearTimeout(mutationTimer);
+            mutationTimer = setTimeout(() => {
+              observer.disconnect();
+              handleAutoFill();
+              logDebug('Auto-fill triggered after DOM stabilized');
+            }, stabilityDelay);
+          });
+
+          // Start observing
+          observer.observe(document.body, { childList: true, subtree: true });
+
+          // Initial delay
+          setTimeout(() => {
+            if (mutationTimer) clearTimeout(mutationTimer);
+            mutationTimer = setTimeout(() => {
+              observer.disconnect();
+              handleAutoFill();
+              logDebug('Auto-fill triggered after initial delay');
+            }, stabilityDelay);
+          }, 1500);
+
+          // Fail-safe: trigger after max wait time regardless
+          setTimeout(() => {
+            if (mutationTimer) clearTimeout(mutationTimer);
+            observer.disconnect();
+            handleAutoFill();
+            logDebug('Auto-fill triggered after max wait time');
+          }, maxWaitTime);
         }
       }, true);
       logDebug('LinkedIn step button hook installed');
