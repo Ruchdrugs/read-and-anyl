@@ -16,6 +16,101 @@ async function load() {
   getEl('role').value = settings.persona?.role || '';
   getEl('tone').value = settings.persona?.tone || '';
   getEl('extra').value = settings.persona?.extra || '';
+
+  // Load stored answers
+  loadStoredAnswers(settings.storedAnswers || {});
+}
+
+function loadStoredAnswers(storedAnswers) {
+  const container = getEl('storedAnswersContainer');
+  if (!container) return;
+
+  // Clear existing rows
+  container.innerHTML = '';
+
+  // Add rows for existing stored answers
+  const entries = Object.entries(storedAnswers);
+  if (entries.length === 0) {
+    addAnswerRow('', ''); // Add one empty row
+  } else {
+    entries.forEach(([question, answer]) => {
+      addAnswerRow(question, answer);
+    });
+  }
+}
+
+function addAnswerRow(question = '', answer = '') {
+  const container = getEl('storedAnswersContainer');
+  if (!container) return;
+
+  const row = document.createElement('div');
+  row.className = 'answer-row';
+
+  const questionInput = document.createElement('input');
+  questionInput.type = 'text';
+  questionInput.className = 'question-pattern';
+  questionInput.placeholder = 'Question pattern (e.g., years of experience)';
+  questionInput.value = question;
+
+  const answerInput = document.createElement('input');
+  answerInput.type = 'text';
+  answerInput.className = 'answer-value';
+  answerInput.placeholder = 'Your answer';
+  answerInput.value = answer;
+
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'Remove';
+  removeBtn.className = 'remove-answer';
+  removeBtn.type = 'button';
+  removeBtn.addEventListener('click', () => row.remove());
+
+  row.appendChild(questionInput);
+  row.appendChild(answerInput);
+  row.appendChild(removeBtn);
+
+  container.appendChild(row);
+}
+
+function collectStoredAnswers() {
+  const container = getEl('storedAnswersContainer');
+  if (!container) return {};
+
+  const rows = container.querySelectorAll('.answer-row');
+  const storedAnswers = {};
+
+  rows.forEach(row => {
+    const question = row.querySelector('.question-pattern')?.value?.trim();
+    const answer = row.querySelector('.answer-value')?.value?.trim();
+    if (question && answer) {
+      storedAnswers[question] = answer;
+    }
+  });
+
+  return storedAnswers;
+}
+
+function loadCommonQuestions() {
+  const commonQuestions = {
+    'years of experience': '',
+    'work authorization': '',
+    'visa sponsorship': '',
+    'willing to relocate': '',
+    'salary expectations': '',
+    'start date': '',
+    'security clearance': '',
+    'driver license': ''
+  };
+
+  const container = getEl('storedAnswersContainer');
+  if (!container) return;
+
+  // Clear existing rows
+  container.innerHTML = '';
+
+  // Add rows for common questions
+  Object.entries(commonQuestions).forEach(([question, answer]) => {
+    addAnswerRow(question, answer);
+  });
 }
 
 async function save() {
