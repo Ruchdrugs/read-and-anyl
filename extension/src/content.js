@@ -88,6 +88,66 @@ function isStrongQuestionLabel(text) {
   return /\?\s*$/.test(t) || /\b(tell me about|describe|why|how did you|what would you|please provide|explain)\b/.test(t);
 }
 
+function classifyFieldType(node) {
+  if (!node) return 'text';
+  const tag = node.tagName?.toLowerCase();
+  const type = node.type?.toLowerCase();
+
+  if (tag === 'select') return 'select';
+  if (tag === 'input') {
+    if (type === 'radio') return 'radio';
+    if (type === 'checkbox') return 'checkbox';
+    if (type === 'file') return 'file';
+    if (type === 'number' || type === 'tel') return 'number';
+    if (type === 'email') return 'text'; // Treat email as text
+    return 'text'; // Default for other input types
+  }
+  if (tag === 'textarea' || node.isContentEditable) return 'text';
+  return 'text'; // Default fallback
+}
+
+function recognizeQuestionType(labelText) {
+  if (!labelText) return 'open_ended';
+  const t = labelText.toLowerCase().trim();
+
+  // Years of experience
+  if (/how many years|years of experience|years.{0,20}experience/i.test(t)) {
+    return 'years_experience';
+  }
+
+  // Work authorization / visa
+  if (/authorized? to work|work authorization|visa|sponsorship|require.{0,20}visa/i.test(t)) {
+    return 'work_authorization';
+  }
+
+  // Relocation / commute
+  if (/willing to relocate|relocate|commute/i.test(t)) {
+    return 'relocation';
+  }
+
+  // Salary / compensation
+  if (/salary|compensation|pay rate|expected.{0,20}salary/i.test(t)) {
+    return 'salary';
+  }
+
+  // Start date / availability
+  if (/start date|available|when can you start/i.test(t)) {
+    return 'start_date';
+  }
+
+  // Cover letter
+  if (/cover letter/i.test(t)) {
+    return 'cover_letter';
+  }
+
+  // Boolean yes/no questions
+  if (/\b(yes|no)\b.*\?|\?.*\b(yes|no)\b/i.test(t)) {
+    return 'boolean';
+  }
+
+  return 'open_ended';
+}
+
 function getFieldLabel(node) {
   // Derive a human-readable label for a field from multiple sources
   // 1) <label for="id"> association
