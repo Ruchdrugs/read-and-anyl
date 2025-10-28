@@ -355,13 +355,22 @@ function findQuestionFields() {
   const candidates = document.querySelectorAll(QUESTION_SELECTORS.join(','));
   for (const node of candidates) {
     if (node.hasAttribute?.(FILLED_ATTR) || filledNodes.has(node)) continue;
+
+    // Classify field type
+    const fieldType = classifyFieldType(node);
+
+    // Get label
     const label = getFieldLabel(node);
+
+    // Recognize question type
+    const questionType = recognizeQuestionType(label);
+
     if (isLinkedInNonQuestionField(node, label, node.getAttribute?.('placeholder'))) {
       logDebug('Skipping non-question field', { label, placeholder: node.getAttribute?.('placeholder') });
       continue;
     }
 
-    // In LinkedIn Easy Apply, relax heuristics and include obvious text inputs
+    // In LinkedIn Easy Apply, relax heuristics and include obvious inputs
     const inLinkedInApply = isInLinkedInApplyContainer(node);
     if (inLinkedInApply) {
       const tag = node.tagName?.toLowerCase();
@@ -374,9 +383,15 @@ function findQuestionFields() {
         (tag === 'div' && node.getAttribute?.('role') === 'textbox') ||
         (tag === 'input' && (node.type === 'text' || !node.type) && (rows >= 3 || ariaMultiline || maxLength >= 120))
       );
-      if (isTextual) {
+      // Include all field types in LinkedIn Easy Apply, not just textual
+      if (isTextual || fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox' || fieldType === 'number' || fieldType === 'file') {
         const placeholder = node.getAttribute?.('placeholder') || '';
-        fields.push({ node, label: label || placeholder || 'application question' });
+        fields.push({
+          node,
+          label: label || placeholder || 'application question',
+          fieldType,
+          questionType
+        });
         continue;
       }
     }
