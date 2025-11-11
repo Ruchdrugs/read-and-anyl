@@ -254,8 +254,97 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (type === 'CHATGPT_CHECK_AUTH') {
+    try {
+      const isAuthenticated = checkAuthenticationStatus();
+      sendResponse({ ok: true, authenticated: isAuthenticated });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
+  if (type === 'CHATGPT_VALIDATE_SESSION') {
+    try {
+      const isValid = validateSession();
+      sendResponse({ ok: true, authenticated: isValid });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
   return false;
 });
+
+// Check if user is authenticated in ChatGPT
+function checkAuthenticationStatus() {
+  // Look for signs of authenticated state
+  const authSelectors = [
+    'button[data-testid="send-button"]',
+    'textarea[data-id="prompt-textarea"]',
+    '[data-testid="user-menu"]',
+    '.main-user-menu'
+  ];
+
+  // Look for login/signup indicators (not authenticated)
+  const loginSelectors = [
+    'a[href*="login"]',
+    'a[href*="signup"]',
+    'button:contains("Log in")',
+    'button:contains("Sign up")',
+    '.login-button',
+    '.signup-button'
+  ];
+
+  const hasAuthElements = authSelectors.some(selector => {
+    const element = document.querySelector(selector);
+    return element && element.offsetParent !== null;
+  });
+
+  const hasLoginElements = loginSelectors.some(selector => {
+    const elements = document.querySelectorAll(selector);
+    return Array.from(elements).some(el =>
+      el.offsetParent !== null &&
+      (el.innerText.includes('Log in') || el.innerText.includes('Sign up'))
+    );
+  });
+
+  // If we see auth elements and no login elements, assume authenticated
+  return hasAuthElements && !hasLoginElements;
+}
+
+// Validate current session is active and usable
+function validateSession() {
+  try {
+    // Check if we're on the correct domain
+    if (!location.hostname.includes('chat.openai.com')) {
+      return false;
+    }
+
+    // Check authentication status
+    if (!checkAuthenticationStatus()) {
+      return false;
+    }
+
+    // Check for functional input
+    const input = document.querySelector('textarea[data-id="prompt-textarea"], textarea');
+    if (!input || input.disabled) {
+      return false;
+    }
+
+    // Check for send button
+    const sendButton = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send"]');
+    if (!sendButton || sendButton.disabled) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Session validation error:', error);
+    return false;
+  }
+}
 
 // Auto-detect if we're on ChatGPT page and notify background script
 if (location.hostname.includes('chat.openai.com')) {
