@@ -353,16 +353,28 @@ async function handleAutoFill() {
   } catch (_) {}
 
   if (!answers) {
-    // Fallback to local drafting per field if Gemini failed
-    for (const { node, label } of fields) {
-      const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
-      if (ok && answer) {
-        setFieldValue(node, answer);
-        node.setAttribute?.(FILLED_ATTR, '1');
-        filledNodes.add(node);
+    // Try ChatGPT as fallback if enabled
+    try {
+      const chatgptAnswers = await tryChatGPTAnswers(labels, pageContext);
+      if (chatgptAnswers && chatgptAnswers.length > 0) {
+        answers = chatgptAnswers;
       }
+    } catch (error) {
+      console.log('ChatGPT fallback failed:', error);
     }
-    return;
+
+    // Final fallback to local drafting per field if both AI services failed
+    if (!answers) {
+      for (const { node, label } of fields) {
+        const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
+        if (ok && answer) {
+          setFieldValue(node, answer);
+          node.setAttribute?.(FILLED_ATTR, '1');
+          filledNodes.add(node);
+        }
+      }
+      return;
+    }
   }
 
   // Fill answers back into fields
