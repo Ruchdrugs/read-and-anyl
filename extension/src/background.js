@@ -190,6 +190,72 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type } = message || {};
+
+  // ChatGPT specific handlers
+  if (type === 'CHATGPT_ASK_DIRECT') {
+    (async () => {
+      try {
+        const sessionPool = getSessionPool();
+        const result = await sessionPool.enqueueRequest(message.prompt, {
+          priority: message.priority || 'normal',
+          timeout: (message.timeout || 60) * 1000
+        });
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_GET_STATUS') {
+    try {
+      const sessionPool = getSessionPool();
+      const status = sessionPool.getStatus();
+      sendResponse({ ok: true, status });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
+  if (type === 'CHATGPT_GET_SETTINGS') {
+    (async () => {
+      try {
+        const settings = await getChatGPTSettings();
+        sendResponse({ ok: true, settings });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_SAVE_SETTINGS') {
+    (async () => {
+      try {
+        await saveChatGPTSettings(message.partial || {});
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_PAGE_LOADED') {
+    try {
+      const authManager = getAuthManager();
+      // Handle new ChatGPT page loaded
+      console.log('ChatGPT page loaded:', message.url);
+      sendResponse({ ok: true });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
+  // Original handlers
   if (type === 'DRAFT_ANSWER') {
     (async () => {
       try {
