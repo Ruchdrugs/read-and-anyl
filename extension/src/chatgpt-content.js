@@ -214,7 +214,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return sendResponse({ ok: false, error: 'ChatGPT input not found' });
         }
 
-        const okSet = setChatGPTPrompt(input, message.prompt || '');
+        const okSet = await setChatGPTPrompt(input, message.prompt || '');
         if (!okSet) {
           return sendResponse({ ok: false, error: 'Failed to set prompt' });
         }
