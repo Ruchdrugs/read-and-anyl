@@ -35,6 +35,23 @@ async function getSettings() {
   });
 }
 
+async function getChatGPTSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['chatgptSettings'], ({ chatgptSettings }) => {
+      resolve({ ...CHATGPT_SETTINGS, ...(chatgptSettings || {}) });
+    });
+  });
+}
+
+async function saveChatGPTSettings(partial) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['chatgptSettings'], ({ chatgptSettings }) => {
+      const next = { ...CHATGPT_SETTINGS, ...(chatgptSettings || {}), ...partial };
+      chrome.storage.sync.set({ chatgptSettings: next }, () => resolve());
+    });
+  });
+}
+
 async function saveSettings(next) {
   return new Promise((resolve) => {
     chrome.storage.sync.set({ settings: next }, () => resolve());
