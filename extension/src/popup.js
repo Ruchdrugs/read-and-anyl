@@ -113,8 +113,93 @@ async function init() {
     window.close();
   });
 
-  // Insert Ask Gemini button after Answer
+  // ChatGPT button handlers
+  askChatGptEl.addEventListener('click', async () => {
+    if (!tab?.id) return;
+    try {
+      const collect = await sendMessageToTab(tab.id, { type: 'COLLECT_FIELDS' });
+      const labels = collect?.labels || [];
+      const pageContext = collect?.pageContext || '';
+
+      // Build ChatGPT prompt
+      const prompt = [
+        'You are helping with job application interview questions. Based on the context and questions below, draft professional answers for each question.',
+        '',
+        'Page context:', pageContext,
+        '',
+        'Questions to answer:', labels.map((q, i) => `${i + 1}. ${q}`).join('\n'),
+        '',
+        'Return ONLY a JSON array where each element has keys {"question_index": number, "answer": string}.',
+        'Make answers professional, concise (100-150 words), and tailored to the context.',
+        ''
+      ].join('\n');
+
+      await new Promise((resolve) => chrome.runtime.sendMessage({
+        type: 'CHATGPT_ASK_DIRECT',
+        prompt,
+        priority: 'high',
+        timeout: 120
+      }, resolve));
+    } catch (_) {
+      // ignore
+    }
+    window.close();
+  });
+
+  chatgptSettingsEl.addEventListener('click', async () => {
+    try {
+      // Get current settings
+      const settingsResponse = await new Promise(resolve => {
+        chrome.runtime.sendMessage({ type: 'CHATGPT_GET_SETTINGS' }, resolve);
+      });
+
+      if (settingsResponse?.ok) {
+        // Simple settings toggle (for demo purposes)
+        const newEnabled = !settingsResponse.settings.enabled;
+        await new Promise(resolve => {
+          chrome.runtime.sendMessage({
+            type: 'CHATGPT_SAVE_SETTINGS',
+            partial: { enabled: newEnabled }
+          }, resolve);
+        });
+
+        // Update status display
+        await updateChatGPTStatus(chatgptStatusEl);
+      }
+    } catch (_) {
+      // ignore
+    }
+  });
+
+  // Insert ChatGPT container and Ask Gemini button after Answer
+  answerEl.parentElement?.appendChild(chatgptContainerEl);
   answerEl.parentElement?.appendChild(askGeminiEl);
+
+  // Update ChatGPT status
+  updateChatGPTStatus(chatgptStatusEl);
+}
+
+// Update ChatGPT status display
+async function updateChatGPTStatus(statusEl) {
+  try {
+    const response = await new Promise(resolve => {
+      chrome.runtime.sendMessage({ type: 'CHATGPT_GET_STATUS' }, resolve);
+    });
+
+    if (response?.ok) {
+      const status = response.status;
+      statusEl.innerHTML = `
+        <strong>ChatGPT API:</strong>
+        ${status.poolSize}/${status.maxPoolSize} sessions active
+        <br><small>Queue: ${status.queueLength} requests</small>
+        <br><small>Success rate: ${status.statistics?.successRate || 0}%</small>
+      `;
+    } else {
+      statusEl.innerHTML = '<strong>ChatGPT API:</strong> <span style="color: red;">Unavailable</span>';
+    }
+  } catch (error) {
+    statusEl.innerHTML = '<strong>ChatGPT API:</strong> <span style="color: red;">Error loading status</span>';
+  }
 }
 
 init();
