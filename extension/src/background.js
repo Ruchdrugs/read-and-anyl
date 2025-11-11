@@ -1,5 +1,10 @@
 // Background service worker for MV3
-// Implements a fully local answer generator using stored resume text
+// Implements a fully local answer generator using stored resume text with ChatGPT web API integration
+
+// Import ChatGPT modules
+importScripts('extension/src/session-pool.js');
+importScripts('extension/src/api-server.js');
+importScripts('extension/src/auth-manager.js');
 
 const DEFAULT_SETTINGS = {
   // Persisted user data
