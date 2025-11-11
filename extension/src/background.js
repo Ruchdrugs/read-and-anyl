@@ -443,3 +443,78 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+// Initialize ChatGPT components on extension startup
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Extension starting up - initializing ChatGPT components');
+  initializeChatGPTComponents().catch(error => {
+    console.error('Failed to initialize ChatGPT components:', error);
+  });
+});
+
+// Also initialize on install/update
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('Extension installed/updated - initializing ChatGPT components');
+  initializeChatGPTComponents().catch(error => {
+    console.error('Failed to initialize ChatGPT components:', error);
+  });
+});
+
+async function initializeChatGPTComponents() {
+  try {
+    // Initialize ChatGPT settings if not present
+    const chatgptSettings = await getChatGPTSettings();
+    console.log('ChatGPT settings loaded:', chatgptSettings);
+
+    // Initialize session pool
+    const sessionPool = getSessionPool();
+    console.log('ChatGPT session pool initialized');
+
+    // Initialize auth manager
+    const authManager = getAuthManager();
+    console.log('ChatGPT auth manager initialized');
+
+    // Start API server if enabled
+    if (chatgptSettings.enableLocalApi) {
+      try {
+        const apiServer = new ChatGPTApiServer(chatgptSettings.apiPort);
+        await apiServer.start();
+        console.log(`ChatGPT API server started on port ${chatgptSettings.apiPort}`);
+      } catch (error) {
+        console.warn('Failed to start ChatGPT API server:', error);
+        // Continue without API server - native messaging may not be available
+      }
+    }
+
+    // Create initial sessions if pool is empty
+    if (sessionPool.sessions.size === 0 && chatgptSettings.enabled) {
+      console.log('Creating initial ChatGPT sessions...');
+      for (let i = 0; i < Math.min(chatgptSettings.poolSize, 2); i++) {
+        try {
+          await sessionPool.createSession();
+          console.log(`Created initial ChatGPT session ${i + 1}`);
+        } catch (error) {
+          console.error(`Failed to create initial session ${i + 1}:`, error);
+        }
+      }
+    }
+
+    console.log('ChatGPT components initialization complete');
+  } catch (error) {
+    console.error('Error during ChatGPT initialization:', error);
+    throw error;
+  }
+}
+
+// Cleanup on extension suspend
+chrome.runtime.onSuspend.addListener(() => {
+  console.log('Extension suspending - cleaning up ChatGPT components');
+  try {
+    const sessionPool = getSessionPool();
+    sessionPool.cleanup().catch(error => {
+      console.error('Error during session pool cleanup:', error);
+    });
+  } catch (error) {
+    console.error('Error accessing session pool for cleanup:', error);
+  }
+});
