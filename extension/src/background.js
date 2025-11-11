@@ -1,5 +1,10 @@
 // Background service worker for MV3
-// Implements a fully local answer generator using stored resume text
+// Implements a fully local answer generator using stored resume text with ChatGPT web API integration
+
+// Import ChatGPT modules
+importScripts('extension/src/session-pool.js');
+importScripts('extension/src/api-server.js');
+importScripts('extension/src/auth-manager.js');
 
 const DEFAULT_SETTINGS = {
   // Persisted user data
@@ -12,10 +17,37 @@ const DEFAULT_SETTINGS = {
   }
 };
 
+const CHATGPT_SETTINGS = {
+  enabled: true,
+  poolSize: 3,
+  apiPort: 8765,
+  maxRequestsPerHour: 1000,
+  enableLocalApi: true,
+  fallbackEnabled: true,
+  priorityIntegration: true
+};
+
 async function getSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(['settings'], ({ settings }) => {
       resolve({ ...DEFAULT_SETTINGS, ...(settings || {}) });
+    });
+  });
+}
+
+async function getChatGPTSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['chatgptSettings'], ({ chatgptSettings }) => {
+      resolve({ ...CHATGPT_SETTINGS, ...(chatgptSettings || {}) });
+    });
+  });
+}
+
+async function saveChatGPTSettings(partial) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['chatgptSettings'], ({ chatgptSettings }) => {
+      const next = { ...CHATGPT_SETTINGS, ...(chatgptSettings || {}), ...partial };
+      chrome.storage.sync.set({ chatgptSettings: next }, () => resolve());
     });
   });
 }
@@ -158,6 +190,72 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { type } = message || {};
+
+  // ChatGPT specific handlers
+  if (type === 'CHATGPT_ASK_DIRECT') {
+    (async () => {
+      try {
+        const sessionPool = getSessionPool();
+        const result = await sessionPool.enqueueRequest(message.prompt, {
+          priority: message.priority || 'normal',
+          timeout: (message.timeout || 60) * 1000
+        });
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_GET_STATUS') {
+    try {
+      const sessionPool = getSessionPool();
+      const status = sessionPool.getStatus();
+      sendResponse({ ok: true, status });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
+  if (type === 'CHATGPT_GET_SETTINGS') {
+    (async () => {
+      try {
+        const settings = await getChatGPTSettings();
+        sendResponse({ ok: true, settings });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_SAVE_SETTINGS') {
+    (async () => {
+      try {
+        await saveChatGPTSettings(message.partial || {});
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (type === 'CHATGPT_PAGE_LOADED') {
+    try {
+      const authManager = getAuthManager();
+      // Handle new ChatGPT page loaded
+      console.log('ChatGPT page loaded:', message.url);
+      sendResponse({ ok: true });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message || error) });
+    }
+    return true;
+  }
+
+  // Original handlers
   if (type === 'DRAFT_ANSWER') {
     (async () => {
       try {
@@ -343,5 +441,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return true;
+  }
+});
+
+// Initialize ChatGPT components on extension startup
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Extension starting up - initializing ChatGPT components');
+  initializeChatGPTComponents().catch(error => {
+    console.error('Failed to initialize ChatGPT components:', error);
+  });
+});
+
+// Also initialize on install/update
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('Extension installed/updated - initializing ChatGPT components');
+  initializeChatGPTComponents().catch(error => {
+    console.error('Failed to initialize ChatGPT components:', error);
+  });
+});
+
+async function initializeChatGPTComponents() {
+  try {
+    // Initialize ChatGPT settings if not present
+    const chatgptSettings = await getChatGPTSettings();
+    console.log('ChatGPT settings loaded:', chatgptSettings);
+
+    // Initialize session pool
+    const sessionPool = getSessionPool();
+    console.log('ChatGPT session pool initialized');
+
+    // Initialize auth manager
+    const authManager = getAuthManager();
+    console.log('ChatGPT auth manager initialized');
+
+    // Start API server if enabled
+    if (chatgptSettings.enableLocalApi) {
+      try {
+        const apiServer = new ChatGPTApiServer(chatgptSettings.apiPort);
+        await apiServer.start();
+        console.log(`ChatGPT API server started on port ${chatgptSettings.apiPort}`);
+      } catch (error) {
+        console.warn('Failed to start ChatGPT API server:', error);
+        // Continue without API server - native messaging may not be available
+      }
+    }
+
+    // Create initial sessions if pool is empty
+    if (sessionPool.sessions.size === 0 && chatgptSettings.enabled) {
+      console.log('Creating initial ChatGPT sessions...');
+      for (let i = 0; i < Math.min(chatgptSettings.poolSize, 2); i++) {
+        try {
+          await sessionPool.createSession();
+          console.log(`Created initial ChatGPT session ${i + 1}`);
+        } catch (error) {
+          console.error(`Failed to create initial session ${i + 1}:`, error);
+        }
+      }
+    }
+
+    console.log('ChatGPT components initialization complete');
+  } catch (error) {
+    console.error('Error during ChatGPT initialization:', error);
+    throw error;
+  }
+}
+
+// Cleanup on extension suspend
+chrome.runtime.onSuspend.addListener(() => {
+  console.log('Extension suspending - cleaning up ChatGPT components');
+  try {
+    const sessionPool = getSessionPool();
+    sessionPool.cleanup().catch(error => {
+      console.error('Error during session pool cleanup:', error);
+    });
+  } catch (error) {
+    console.error('Error accessing session pool for cleanup:', error);
   }
 });

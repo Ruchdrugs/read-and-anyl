@@ -353,16 +353,28 @@ async function handleAutoFill() {
   } catch (_) {}
 
   if (!answers) {
-    // Fallback to local drafting per field if Gemini failed
-    for (const { node, label } of fields) {
-      const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
-      if (ok && answer) {
-        setFieldValue(node, answer);
-        node.setAttribute?.(FILLED_ATTR, '1');
-        filledNodes.add(node);
+    // Try ChatGPT as fallback if enabled
+    try {
+      const chatgptAnswers = await tryChatGPTAnswers(labels, pageContext);
+      if (chatgptAnswers && chatgptAnswers.length > 0) {
+        answers = chatgptAnswers;
       }
+    } catch (error) {
+      console.log('ChatGPT fallback failed:', error);
     }
-    return;
+
+    // Final fallback to local drafting per field if both AI services failed
+    if (!answers) {
+      for (const { node, label } of fields) {
+        const { ok, answer } = await askForAnswer(label || node.placeholder || '', pageContext);
+        if (ok && answer) {
+          setFieldValue(node, answer);
+          node.setAttribute?.(FILLED_ATTR, '1');
+          filledNodes.add(node);
+        }
+      }
+      return;
+    }
   }
 
   // Fill answers back into fields
@@ -467,6 +479,67 @@ chrome.runtime.onMessage.addListener((message) => {
     } catch (_) {}
   }
 })();
+
+// ------------------------------
+// ChatGPT integration helpers
+// ------------------------------
+
+async function tryChatGPTAnswers(labels, pageContext) {
+  try {
+    // Check if ChatGPT is enabled
+    const settingsResponse = await new Promise(resolve => {
+      chrome.runtime.sendMessage({ type: 'CHATGPT_GET_SETTINGS' }, resolve);
+    });
+
+    if (!settingsResponse?.ok || !settingsResponse?.settings?.enabled) {
+      return null;
+    }
+
+    // Build comprehensive prompt for ChatGPT
+    const prompt = [
+      'You are helping with job application interview questions. Based on the context and questions below, draft professional answers for each question.',
+      '',
+      'Page context:', pageContext,
+      '',
+      'Questions to answer:', labels.map((q, i) => `${i + 1}. ${q}`).join('\n'),
+      '',
+      'Return ONLY a JSON array where each element has keys {"question_index": number, "answer": string}.',
+      'Make answers professional, concise (100-150 words), and tailored to the context.',
+      'Use the STAR method when applicable and provide specific examples.',
+      ''
+    ].join('\n');
+
+    const response = await new Promise(resolve => {
+      chrome.runtime.sendMessage({
+        type: 'CHATGPT_ASK_DIRECT',
+        prompt,
+        priority: 'high',
+        timeout: 120 // 2 minutes for batch processing
+      }, resolve);
+    });
+
+    if (response && response.success && response.text) {
+      try {
+        // Extract JSON from response
+        const jsonMatch = response.text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return parsed.map(item => ({
+            i: (item.question_index || 1) - 1, // Convert to 0-based
+            text: item.answer || ''
+          }));
+        }
+      } catch (parseError) {
+        console.error('Failed to parse ChatGPT JSON response:', parseError);
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('ChatGPT batch processing failed:', error);
+    return null;
+  }
+}
 
 // ------------------------------
 // Gemini integration helpers
