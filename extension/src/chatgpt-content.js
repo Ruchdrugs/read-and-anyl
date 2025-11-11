@@ -23,7 +23,7 @@ async function waitForChatGPTInput() {
 }
 
 // Set prompt text in ChatGPT input
-function setChatGPTPrompt(inputEl, text) {
+async function setChatGPTPrompt(inputEl, text) {
   const val = (text || '').trim();
 
   // Focus the input
