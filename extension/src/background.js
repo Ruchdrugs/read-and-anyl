@@ -17,6 +17,16 @@ const DEFAULT_SETTINGS = {
   }
 };
 
+const CHATGPT_SETTINGS = {
+  enabled: true,
+  poolSize: 3,
+  apiPort: 8765,
+  maxRequestsPerHour: 1000,
+  enableLocalApi: true,
+  fallbackEnabled: true,
+  priorityIntegration: true
+};
+
 async function getSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(['settings'], ({ settings }) => {
