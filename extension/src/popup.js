@@ -39,6 +39,31 @@ async function init() {
   askGeminiEl.textContent = 'Ask Gemini (No API)';
   askGeminiEl.style.marginLeft = '8px';
 
+  // Create ChatGPT controls
+  const chatgptContainerEl = document.createElement('div');
+  chatgptContainerEl.style.marginTop = '10px';
+  chatgptContainerEl.style.padding = '8px';
+  chatgptContainerEl.style.border = '1px solid #ccc';
+  chatgptContainerEl.style.borderRadius = '4px';
+  chatgptContainerEl.style.fontSize = '12px';
+
+  const chatgptStatusEl = document.createElement('div');
+  chatgptStatusEl.innerHTML = 'Loading ChatGPT status...';
+
+  const askChatGptEl = document.createElement('button');
+  askChatGptEl.textContent = 'Ask ChatGPT (Web API)';
+  askChatGptEl.style.marginRight = '8px';
+  askChatGptEl.style.marginTop = '5px';
+
+  const chatgptSettingsEl = document.createElement('button');
+  chatgptSettingsEl.textContent = 'ChatGPT Settings';
+  chatgptSettingsEl.style.marginTop = '5px';
+
+  chatgptContainerEl.appendChild(chatgptStatusEl);
+  chatgptContainerEl.appendChild(document.createElement('br'));
+  chatgptContainerEl.appendChild(askChatGptEl);
+  chatgptContainerEl.appendChild(chatgptSettingsEl);
+
   const resp = await getSettings();
   const settings = resp?.settings || {};
   const tab = await queryActiveTab();
